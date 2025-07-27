@@ -5,7 +5,7 @@
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <visualization_msgs/msg/marker.hpp>
-#include "PathPlannerStrategy.hpp"
+#include "motion_planning/PathPlannerStrategy.hpp"
 
 class GlobalPlanner
 {

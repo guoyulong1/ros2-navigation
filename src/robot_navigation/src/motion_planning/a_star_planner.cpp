@@ -1,7 +1,6 @@
 
-#include "robot_navigation/planners/a_star_planner.hpp"
-
-
+#include "robot_navigation/motion_planning/a_star_planner.hpp"
+#include "log/logging.hpp"
 
 AStarPlanner::AStarPlanner(const int distance, const int OccupyThresh, const int InflateRadius)
 {
@@ -76,7 +75,7 @@ nav_msgs::msg::Path AStarPlanner::plan(
         Path.poses.push_back(pose);
     }
 
-    RCLCPP_INFO(rclcpp::get_logger("AStarPlanner"), "Planned path with %lu points", Path.poses.size());
+    LOG_INFO("Planned path with %lu points", Path.poses.size());
 
     return Path;
 }

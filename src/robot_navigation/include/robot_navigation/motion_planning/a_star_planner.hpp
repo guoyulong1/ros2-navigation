@@ -1,6 +1,6 @@
 #pragma once
 
-#include "robot_navigation/PathPlannerStrategy.hpp"
+#include "PathPlannerStrategy.hpp"
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 #include <cv_bridge/cv_bridge.h>

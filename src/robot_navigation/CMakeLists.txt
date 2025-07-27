@@ -31,12 +31,14 @@ include_directories(
 # ------------------------------------------------------------------------------
 # Executable & Sources
 # ------------------------------------------------------------------------------
-add_executable(navigation_node
-  src/navigation_node.cpp 
-  src/main.cpp
-  src/map_manager.cpp  
-  src/planners/a_star_planner.cpp
+file(GLOB_RECURSE SRC_FILES
+    src/*.cpp
+    src/man_manager/*.cpp
+    src/motion_planning/*.cpp
+    src/path_optimize/*.cpp
 )
+
+add_executable(navigation_node ${SRC_FILES})
 
 target_link_libraries(navigation_node
   ${OpenCV_LIBS}

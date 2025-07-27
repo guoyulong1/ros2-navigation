@@ -1,4 +1,4 @@
-#include "robot_navigation/map_manager.hpp"
+#include "robot_navigation/map_manager/map_manager.hpp"
 
 
 MapManager::MapManager()
