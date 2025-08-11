@@ -75,7 +75,7 @@ nav_msgs::msg::Path AStarPlanner::plan(
         Path.poses.push_back(pose);
     }
 
-    LOG_INFO("Planned path with %lu points", Path.poses.size());
+    LOG_INFO("Planned path with {} points", Path.poses.size());
 
     return Path;
 }

@@ -148,5 +148,5 @@ void NavigationNode::planPath()
     // 发布路径
     path_pub_->publish(path);
     
-    LOG_INFO("Path planned with %zu points", path.poses.size());
+    LOG_INFO("Path planned with {} points", path.poses.size());
 }

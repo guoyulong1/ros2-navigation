@@ -19,6 +19,7 @@ find_package(image_transport REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(nav2_map_server REQUIRED)
+find_package(spdlog REQUIRED)
 
 # ------------------------------------------------------------------------------
 # Include directories
@@ -36,12 +37,14 @@ file(GLOB_RECURSE SRC_FILES
     src/man_manager/*.cpp
     src/motion_planning/*.cpp
     src/path_optimize/*.cpp
+    include/log/logging.cpp
 )
 
 add_executable(navigation_node ${SRC_FILES})
 
 target_link_libraries(navigation_node
   ${OpenCV_LIBS}
+  spdlog::spdlog fmt::fmt
 )
 
 ament_target_dependencies(navigation_node 
