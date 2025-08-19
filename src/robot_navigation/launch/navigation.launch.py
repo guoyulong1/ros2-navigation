@@ -1,6 +1,9 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, RegisterEventHandler, EmitEvent
 from launch_ros.actions import LifecycleNode, Node
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
+from lifecycle_msgs.msg import Transition
 from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -16,7 +19,8 @@ def generate_launch_description():
     map_file = DeclareLaunchArgument(
         'map_file',
         default_value=os.path.join(
-            get_package_share_directory('robot_navigation'),
+            # get_package_share_directory('robot_navigation'),
+            os.path.expanduser('~/Documents/workspace/gitProject/ros2-navigation/src/robot_navigation'),
             'maps',
             'map.yaml'
         ),
@@ -45,6 +49,20 @@ def generate_launch_description():
         }]
     )
 
+    # 启动时立即 configure + activate map_server
+    configure_map_server = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=lambda node: node == map_server_node,
+            transition_id=Transition.TRANSITION_CONFIGURE
+        )
+    )
+
+    activate_map_server = EmitEvent(
+        event=ChangeState(
+            lifecycle_node_matcher=lambda node: node == map_server_node,
+            transition_id=Transition.TRANSITION_ACTIVATE
+        )
+    )
 
     # 导航节点
     navigation_node = Node(
@@ -64,9 +82,12 @@ def generate_launch_description():
         ]
     )
 
+    force_x11 = SetEnvironmentVariable('QT_QPA_PLATFORM', 'xcb')
+
     # RViz2 可视化配置
     rviz_config = os.path.join(
-        get_package_share_directory('robot_navigation'),
+        # get_package_share_directory('robot_navigation'),
+        os.path.expanduser('~/Documents/workspace/gitProject/ros2-navigation/src/robot_navigation'),
         'config',
         'config.rviz'
     )
@@ -105,6 +126,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         log_config,
+        force_x11,
         map_file,
         map_topic,
         start_pose_topic,
@@ -113,6 +135,8 @@ def generate_launch_description():
         obstacle_threshold,
         planning_frequency,
         map_server_node,
+        configure_map_server,
+        activate_map_server,
         navigation_node,
         rviz_node,
         static_tf_node1,
