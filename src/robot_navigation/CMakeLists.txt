@@ -26,6 +26,8 @@ find_package(spdlog REQUIRED)
 # ------------------------------------------------------------------------------
 include_directories(
   include
+  include/motion_planning
+  include/utils
   ${OpenCV_INCLUDE_DIRS}
 )
 
@@ -34,10 +36,8 @@ include_directories(
 # ------------------------------------------------------------------------------
 file(GLOB_RECURSE SRC_FILES
     src/*.cpp
-    src/man_manager/*.cpp
     src/motion_planning/*.cpp
-    src/path_optimize/*.cpp
-    include/log/logging.cpp
+    src/utils/*.cpp
 )
 
 add_executable(navigation_node ${SRC_FILES})

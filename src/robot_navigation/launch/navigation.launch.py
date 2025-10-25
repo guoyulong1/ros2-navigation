@@ -15,12 +15,11 @@ def generate_launch_description():
         '[{time}] [{name}] [{severity}] {message}'
     )
 
-    # 声明参数
+    # 使用正确的绝对路径
     map_file = DeclareLaunchArgument(
         'map_file',
         default_value=os.path.join(
-            # get_package_share_directory('robot_navigation'),
-            os.path.expanduser('~/Documents/workspace/gitProject/ros2-navigation/src/robot_navigation'),
+            os.path.expanduser('~/Documents/workspace/gitProject/RosProject/ros2-navigation/src/robot_navigation'),
             'maps',
             'map.yaml'
         ),
@@ -28,8 +27,8 @@ def generate_launch_description():
     )
 
     map_topic = DeclareLaunchArgument('map_topic', default_value='map')
-    start_pose_topic = DeclareLaunchArgument('start_pose_topic', default_value='/start_pose')
-    goal_pose_topic = DeclareLaunchArgument('goal_pose_topic', default_value='/goal_pose')
+    start_pose_topic = DeclareLaunchArgument('start_pose_topic', default_value='/initialpose')
+    goal_pose_topic = DeclareLaunchArgument('goal_pose_topic', default_value='goal_pose')
     inflation_radius = DeclareLaunchArgument('inflation_radius', default_value='0.3')
     obstacle_threshold = DeclareLaunchArgument('obstacle_threshold', default_value='127.0')
     planning_frequency = DeclareLaunchArgument('planning_frequency', default_value='1.0')
@@ -39,7 +38,7 @@ def generate_launch_description():
         package='nav2_map_server',
         executable='map_server',
         name='map_server',
-        namespace='', 
+        namespace='',
         output='screen',
         parameters=[{
             'yaml_filename': LaunchConfiguration('map_file'),
@@ -49,18 +48,27 @@ def generate_launch_description():
         }]
     )
 
-    # 启动时立即 configure + activate map_server
+    # 地图服务器状态转换事件处理
+    map_server_configure_event = RegisterEventHandler(
+        OnStateTransition(
+            target_lifecycle_node=map_server_node,
+            goal_state='inactive',
+            entities=[
+                EmitEvent(
+                    event=ChangeState(
+                        lifecycle_node_matcher=lambda node: node == map_server_node,
+                        transition_id=Transition.TRANSITION_ACTIVATE
+                    )
+                )
+            ]
+        )
+    )
+
+    # 启动时配置地图服务器
     configure_map_server = EmitEvent(
         event=ChangeState(
             lifecycle_node_matcher=lambda node: node == map_server_node,
             transition_id=Transition.TRANSITION_CONFIGURE
-        )
-    )
-
-    activate_map_server = EmitEvent(
-        event=ChangeState(
-            lifecycle_node_matcher=lambda node: node == map_server_node,
-            transition_id=Transition.TRANSITION_ACTIVATE
         )
     )
 
@@ -74,20 +82,14 @@ def generate_launch_description():
             'inflation_radius': LaunchConfiguration('inflation_radius'),
             'obstacle_threshold': LaunchConfiguration('obstacle_threshold'),
             'planning_frequency': LaunchConfiguration('planning_frequency')
-        }],
-        remappings=[
-            ('map', LaunchConfiguration('map_topic')),
-            ('start_pose', LaunchConfiguration('start_pose_topic')),
-            ('goal_pose', LaunchConfiguration('goal_pose_topic'))
-        ]
+        }]
     )
 
     force_x11 = SetEnvironmentVariable('QT_QPA_PLATFORM', 'xcb')
 
-    # RViz2 可视化配置
+    # RViz2 可视化配置 - 使用正确路径
     rviz_config = os.path.join(
-        # get_package_share_directory('robot_navigation'),
-        os.path.expanduser('~/Documents/workspace/gitProject/ros2-navigation/src/robot_navigation'),
+        os.path.expanduser('~/Documents/workspace/gitProject/RosProject/ros2-navigation/src/robot_navigation'),
         'config',
         'config.rviz'
     )
@@ -135,8 +137,8 @@ def generate_launch_description():
         obstacle_threshold,
         planning_frequency,
         map_server_node,
+        map_server_configure_event,
         configure_map_server,
-        activate_map_server,
         navigation_node,
         rviz_node,
         static_tf_node1,

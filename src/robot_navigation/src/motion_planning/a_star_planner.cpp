@@ -1,6 +1,6 @@
 
-#include "robot_navigation/motion_planning/a_star_planner.hpp"
-#include "log/logging.hpp"
+#include "motion_planning/a_star_planner.hpp"
+#include "utils/logger.hpp"
 
 AStarPlanner::AStarPlanner(const int distance, const int OccupyThresh, const int InflateRadius)
 {

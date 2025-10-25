@@ -12,4 +12,3 @@ ros2 lifecycle set /map_server configure
 
 激活地图：
 ros2 lifecycle set /map_server activate
-

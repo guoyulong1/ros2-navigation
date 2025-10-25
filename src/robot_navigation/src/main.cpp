@@ -1,14 +1,19 @@
 #include <rclcpp/rclcpp.hpp>
-#include "robot_navigation/navigation_node.hpp"
-#include "log/logging.hpp"
+#include "navigation_manager.hpp"
+#include "utils/logger.hpp"
+#include "comm_manager.hpp"
 
-
-int main(int argc, char **argv)
+int main(const int argc, char **argv)
 {
     rclcpp::init(argc, argv);
     init_logger();
-    auto Navigation_node = std::make_shared<NavigationNode>();
-    rclcpp::spin(Navigation_node);
+    auto& comm_manager = CommManager::Instance();
+    comm_manager.initialize();
+    rclcpp::spin(comm_manager.get_node_base_interface());
+
+    auto& navigation_node = NavigationNode::getInstance();
+    rclcpp::spin(navigation_node.get_node_base_interface());
+
     rclcpp::shutdown();
     return 0;
 }
