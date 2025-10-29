@@ -1,5 +1,5 @@
 #include "map_manager.hpp"
-
+#include "utils/logger.hpp"
 
 MapManager::MapManager()
 : inflation_radius_(0.3), obstacle_threshold_(50)
@@ -16,9 +16,13 @@ nav_msgs::msg::OccupancyGrid MapManager::processMap(const nav_msgs::msg::Occupan
 {
     // 将OccupancyGrid转换为OpenCV图像
     const cv::Mat map_image = occupancyGridToCvImage(map_msg);
+
+    cv::imwrite("map_image.jpg",map_image);
     
     // 对障碍物进行膨胀处理
     const cv::Mat inflated_map = inflateObstacles(map_image, inflation_radius_, map_msg->info.resolution);
+
+    cv::imwrite("inflated_map.jpg",inflated_map);
     
     // 将处理后的图像转换回OccupancyGrid
     return cvImageToOccupancyGrid(inflated_map, map_msg);
@@ -39,8 +43,8 @@ nav_msgs::msg::OccupancyGrid MapManager::cvImageToOccupancyGrid(const cv::Mat& m
     // 填充数据
     for (int i = 0; i < map_image.rows; ++i) {
         for (int j = 0; j < map_image.cols; ++j) {
-            int idx = i * map_image.cols + j;
-            uchar value = map_image.at<uchar>(i, j);
+            const int idx = i * map_image.cols + j;
+            const uchar value = map_image.at<uchar>(i, j);
             
             if (value == 127) {  // 未知区域
                 map_msg.data[idx] = -1;
@@ -89,15 +93,19 @@ cv::Mat MapManager::inflateObstacles(const cv::Mat& map_image, double inflation_
 {
     // 计算膨胀半径对应的像素数
     int inflation_pixels = static_cast<int>(inflation_radius / resolution);
-    
-    // 创建膨胀核
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, 
+    inflation_pixels = std::max(1, inflation_pixels); // 确保至少1个像素
+
+    LOG_INFO("Inflating obstacles by {} pixels (radius: {} m, resolution: {} m/pixel)",
+             inflation_pixels, inflation_radius, resolution);
+
+    // 创建腐蚀核
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE,
                                               cv::Size(2 * inflation_pixels + 1, 2 * inflation_pixels + 1));
-    
-    // 对障碍物进行膨胀处理
+
+    // 对白色自由区域进行腐蚀
     cv::Mat inflated_map;
-    cv::dilate(map_image, inflated_map, kernel);
-    
+    cv::erode(map_image, inflated_map, kernel);
+
     return inflated_map;
 }
 

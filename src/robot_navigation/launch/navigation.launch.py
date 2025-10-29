@@ -29,8 +29,8 @@ def generate_launch_description():
     map_topic = DeclareLaunchArgument('map_topic', default_value='map')
     start_pose_topic = DeclareLaunchArgument('start_pose_topic', default_value='/initialpose')
     goal_pose_topic = DeclareLaunchArgument('goal_pose_topic', default_value='goal_pose')
-    inflation_radius = DeclareLaunchArgument('inflation_radius', default_value='0.3')
-    obstacle_threshold = DeclareLaunchArgument('obstacle_threshold', default_value='127.0')
+    inflation_radius = DeclareLaunchArgument('inflation_radius', default_value='0.15')
+    obstacle_threshold = DeclareLaunchArgument('obstacle_threshold', default_value='50.0')
     planning_frequency = DeclareLaunchArgument('planning_frequency', default_value='1.0')
 
     # 地图服务器节点（生命周期）

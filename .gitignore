@@ -48,6 +48,7 @@ install/
 # vscode
 .vscode/
 .idea/
+.venv/
 
 # logs
 logs/

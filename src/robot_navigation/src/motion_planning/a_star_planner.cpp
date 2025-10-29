@@ -1,12 +1,16 @@
-
 #include "motion_planning/a_star_planner.hpp"
 #include "utils/logger.hpp"
 
-AStarPlanner::AStarPlanner(const int distance, const int OccupyThresh, const int InflateRadius)
+AStarPlanner::AStarPlanner(const int distance, const int OccupyThresh)
 {
-    Distance_ = distance;
-    OccupyThresh_ = OccupyThresh;
-    InflateRadius_ = InflateRadius;
+    LOG_INFO("distance:{},occupiedThresh:{}", distance, OccupyThresh);
+    distance_type_ = distance;
+    occupy_thresh_ = OccupyThresh;
+}
+
+AStarPlanner::~AStarPlanner()
+{
+    cleanup();
 }
 
 nav_msgs::msg::Path AStarPlanner::plan(
@@ -14,277 +18,287 @@ nav_msgs::msg::Path AStarPlanner::plan(
     const geometry_msgs::msg::PoseStamped& start,
     const geometry_msgs::msg::PoseStamped& goal)
 {
-    nav_msgs::msg::Path Path;
+    nav_msgs::msg::Path path;
     
     if (!map || map->data.empty()) {
-        RCLCPP_ERROR(rclcpp::get_logger("AStarPlanner"), "Invalid map");
-        return Path;
+        LOG_ERROR("Invalid map");
+        return path;
     }
-    
-    int width = map->info.width;
-    int height = map->info.height;
-    double resolution = map->info.resolution;
-    double origin_x = map->info.origin.position.x;
-    double origin_y = map->info.origin.position.y;
+
+    const int width = map->info.width;
+    const int height = map->info.height;
+    const double resolution = map->info.resolution;
+    const double origin_x = map->info.origin.position.x;
+    const double origin_y = map->info.origin.position.y;
 
     cv::Mat map_image(height, width, CV_8UC1);
     for (int y = 0; y < height; ++y)
     {
         for (int x = 0; x < width; ++x)
         {
-            int i = x + (height - 1 - y) * width;
-            int val = map->data[i];
-            map_image.at<uchar>(y, x) = (val < 0 || val > 50) ? 0 : 255;
+            const int i = x +  (height - 1 - y) * width;
+            const int val = map->data[i];
+            map_image.at<uchar>(y, x) = val < 0 || val > occupy_thresh_ ? 0 : 255;
         }
     }
+    cv::imwrite("map.jpg", map_image);
 
-    InitAstar(map_image);
+    initAstar(map_image);
 
-    // Check if start/goal are valid
-    if (!isValid(startPoint) || !isValid(targetPoint)) {
-        RCLCPP_ERROR(rclcpp::get_logger("AStarPlanner"), "Invalid start/goal position");
-        return Path;
-    }
-
-    auto worldToMap = [&](double wx, double wy) -> cv::Point {
-        int mx = static_cast<int>((wx - origin_x) / resolution);
-        int my = static_cast<int>((wy - origin_y) / resolution);
+    auto worldToMap = [&](const double wx, const double wy) -> cv::Point {
+        const int mx = static_cast<int>((wx - origin_x) / resolution);
+        const int my = static_cast<int>((wy - origin_y) / resolution);
         return cv::Point(mx, height - 1 - my);  
     };
 
-    startPoint = worldToMap(start.pose.position.x, start.pose.position.y);
-    targetPoint = worldToMap(goal.pose.position.x, goal.pose.position.y);
-    std::vector<cv::Point> pixel_path;
+    start_point_ = worldToMap(start.pose.position.x, start.pose.position.y);
+    target_point_ = worldToMap(goal.pose.position.x, goal.pose.position.y);
+
+    // Check if start/goal are valid
+    if (!isValid(start_point_) || !isValid(target_point_)) {
+        LOG_ERROR("Invalid start/goal position");
+        return path;
+    }
+
+    if (!isTraversable(start_point_) || !isTraversable(target_point_)) {
+        LOG_ERROR("Start or goal point is in obstacle");
+        return path;
+    }
+
     // Path Planning
-    Node* TailNode = FindPath();
-    GetPath(TailNode, pixel_path);
+    LOG_INFO("begin find path");
+    Node* end_node = findPath();
+    LOG_INFO("find path success");
+
+    // Path Reconstruct
+    std::vector<cv::Point> pixel_path;
+    reconstructPath(end_node, pixel_path);
 
     for (const auto& pt : pixel_path)
     {
         geometry_msgs::msg::PoseStamped pose;
         pose.header = map->header;
 
-        double wx = pt.x * resolution + origin_x;
-        double wy = (height - 1 - pt.y) * resolution + origin_y;
+        const double wx = pt.x * resolution + origin_x;
+        const double wy = (height - 1 - pt.y) * resolution + origin_y;
 
         pose.pose.position.x = wx;
         pose.pose.position.y = wy;
         pose.pose.position.z = 0.0;
         pose.pose.orientation.w = 1.0;
 
-        Path.poses.push_back(pose);
+        path.poses.push_back(pose);
     }
 
-    LOG_INFO("Planned path with {} points", Path.poses.size());
+    LOG_INFO("Planned path with {} points", path.poses.size());
 
-    return Path;
+    return path;
 }
 
-void AStarPlanner::InitAstar(cv::Mat& _Map)
+void AStarPlanner::initAstar(const cv::Mat& map)
 {
-    cv::Mat Mask;
-    char neighbor8[8][2] = {
-            {-1, -1}, {-1, 0}, {-1, 1},
-            {0, -1},            {0, 1},
-            {1, -1},   {1, 0},  {1, 1}
-    };
-
-    Map = _Map;
-    neighbor = cv::Mat(8, 2, CV_8S, neighbor8).clone();
-
-    MapProcess(Mask);
+    map_ = map.clone();
+    processMap();
 }
 
-void AStarPlanner::MapProcess(cv::Mat& Mask)
+void AStarPlanner::processMap()
 {
-    int width = Map.cols;
-    int height = Map.rows;
-    cv::Mat _Map = Map.clone();
+    const int width = map_.cols;
+    const int height = map_.rows;
+    cv::Mat processed_map = map_.clone();
 
     // Transform RGB to gray image
-    if(_Map.channels() == 3)
+    if(processed_map.channels() == 3)
     {
-        cvtColor(_Map.clone(), _Map, cv::COLOR_BGR2GRAY);
+        cvtColor(processed_map.clone(), processed_map, cv::COLOR_BGR2GRAY);
     }
 
     // Binarize
-    if(OccupyThresh_ < 0)
+    if(occupy_thresh_ < 0)
     {
-        threshold(_Map.clone(), _Map, 0, 255, cv::THRESH_OTSU);
+        threshold(processed_map.clone(), processed_map, 0, 255, cv::THRESH_OTSU);
     } else
     {
-        threshold(_Map.clone(), _Map, OccupyThresh_, 255, cv::THRESH_BINARY);
+        threshold(processed_map.clone(), processed_map, occupy_thresh_, 255, cv::THRESH_BINARY);
     }
 
-    // Inflate
-    cv::Mat src = _Map.clone();
-    if(InflateRadius_ > 0)
-    {
-        cv::Mat se = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(2 * InflateRadius_, 2 * InflateRadius_));
-        erode(src, _Map, se);
-    }
-
-    // Get mask
-    bitwise_xor(src, _Map, Mask);
-
-    // Initial LabelMap
-    LabelMap = cv::Mat::zeros(height, width, CV_8UC1);
-    for(int y=0;y<height;y++)
-    {
-        for(int x=0;x<width;x++)
-        {
-            if(_Map.at<uchar>(y, x) == 0)
-            {
-                LabelMap.at<uchar>(y, x) = obstacle;
-            }
-            else
-            {
-                LabelMap.at<uchar>(y, x) = free;
-            }
+    // Initial label_map_
+    label_map_ = cv::Mat::zeros(height, width, CV_8UC1);
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            label_map_.at<uchar>(y, x) = processed_map.at<uchar>(y, x) == 0 ? obstacle : free;
         }
     }
+
+    // 调试信息
+    int obstacle_count = 0;
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            if (label_map_.at<uchar>(y, x) == obstacle) obstacle_count++;
+        }
+    }
+    LOG_INFO("Map processed - Obstacles: {}, Free: {}", obstacle_count, width * height - obstacle_count);
 }
 
-AStarPlanner::Node* AStarPlanner::FindPath()
+AStarPlanner::Node* AStarPlanner::findPath()
 {
-    int width = Map.cols;
-    int height = Map.rows;
-    cv::Mat _LabelMap = LabelMap.clone();
+    cv::Mat search_label_map = label_map_.clone();
 
-    // Add startPoint to OpenList
-    Node* startPointNode = new Node(startPoint);
-    OpenList.push(std::pair<int, cv::Point>(startPointNode->F, startPointNode->point));
-    int index = point2index(startPointNode->point);
-    OpenDict[index] = startPointNode;
-    _LabelMap.at<uchar>(startPoint.y, startPoint.x) = inOpenList;
+    const std::vector<cv::Point> neighbors = {
+        {-1, -1}, {-1, 0}, {-1, 1},
+        {0, -1},           {0, 1},
+        {1, -1},  {1, 0},  {1, 1}
+    };
+    // cv::Mat neighbors(8, 2, CV_8S, neighbor8);
 
-    while(!OpenList.empty())
+    cleanup();
+
+    // Add start_point_ to OpenList
+    auto start_node = new Node(start_point_);
+    start_node->H = calculateHeuristic(start_point_, target_point_);
+    start_node->F = start_node->H;
+
+    open_list_.push(std::make_pair(start_node->F, start_node->point));
+    open_dict_[pointToIndex(start_point_)] = start_node;
+    all_nodes_.push_back(start_node);
+    search_label_map.at<uchar>(start_point_.y, start_point_.x) = inOpenList;
+
+    while(!open_list_.empty())
     {
-        // Find the node with least F value
-        cv::Point CurPoint = OpenList.top().second;
-        OpenList.pop();
-        int index = point2index(CurPoint);
-        Node* CurNode = OpenDict[index];
-        OpenDict.erase(index);
 
-        int curX = CurPoint.x;
-        int curY = CurPoint.y;
-        _LabelMap.at<uchar>(curY, curX) = inCloseList;
+        // Find the node with least F value
+        cv::Point current_point = open_list_.top().second;
+        open_list_.pop();
+
+        int current_index = pointToIndex(current_point);
+        auto it = open_dict_.find(current_index);
+        if (it == open_dict_.end()) {
+            continue; // 节点已被处理
+        }
+
+        Node* current_node = it->second;
+        open_dict_.erase(it);
+        search_label_map.at<uchar>(current_point.y, current_point.x) = inCloseList;
 
         // Determine whether arrive the target point
-        if(curX == targetPoint.x && curY == targetPoint.y)
-        {
-            return CurNode; // Find a valid path
+        if (current_point == target_point_) {
+            return current_node;
         }
 
         // Traversal the neighborhood
-        for(int k = 0;k < neighbor.rows;k++)
+        for(const auto& d : neighbors)
         {
-            int y = curY + neighbor.at<char>(k, 0);
-            int x = curX + neighbor.at<char>(k, 1);
-            if(x < 0 || x >= width || y < 0 || y >= height)
-            {
+            const int nx = current_point.x + d.x;
+            const int ny = current_point.y + d.y;
+            cv::Point neighbor_point(nx, ny);
+
+            if (!isValid(neighbor_point)) {
                 continue;
             }
-            if(_LabelMap.at<uchar>(y, x) == free || _LabelMap.at<uchar>(y, x) == inOpenList)
-            {
-                // Determine whether a diagonal line can pass
-                int dist1 = abs(neighbor.at<char>(k, 0)) + abs(neighbor.at<char>(k, 1));
-                if(dist1 == 2 && _LabelMap.at<uchar>(y, curX) == obstacle && _LabelMap.at<uchar>(curY, x) == obstacle)
-                    continue;
 
-                // Calculate G, H, F value
-                int addG, G, H, F;
-                if(dist1 == 2)
+            if (label_map_.at<uchar>(neighbor_point.y, neighbor_point.x) == obstacle) {
+                continue;
+            }
+
+            const uchar neighbor_search_label = search_label_map.at<uchar>(ny, nx);
+            if (neighbor_search_label == obstacle) {
+                continue;
+            }
+
+            if (std::abs(d.x) == 1 && std::abs(d.y) == 1) {
+                cv::Point horz(current_point.x + d.x, current_point.y);
+                cv::Point vert(current_point.x, current_point.y + d.y);
+
+                if (!isValid(horz) || !isValid(vert) ||
+                    label_map_.at<uchar>(horz.y, horz.x) == obstacle ||
+                    label_map_.at<uchar>(vert.y, vert.x) == obstacle) {
+                    continue;
+                    }
+            }
+
+            const int move_cost = (std::abs(d.x) == 1 && std::abs(d.y) == 1) ? COST_DIAGONAL : COST_STRAIGHT;
+            const int new_g = current_node->G + move_cost;
+            int neighbor_index = pointToIndex(neighbor_point);
+
+            if(neighbor_search_label == free || neighbor_search_label == inOpenList)
+            {
+                // Update the G, H, F value of node
+                if(neighbor_search_label == free)
                 {
-                    addG = 14;
+                    const auto neighbor_node = new Node(neighbor_point);
+                    neighbor_node->parent = current_node;
+                    neighbor_node->G = new_g;
+                    neighbor_node->H = calculateHeuristic(neighbor_point, target_point_);
+                    neighbor_node->F = neighbor_node->G + neighbor_node->H;
+                    open_list_.push(std::make_pair(neighbor_node->F, neighbor_node->point));
+                    open_dict_[neighbor_index] = neighbor_node;
+                    all_nodes_.push_back(neighbor_node);
+                    search_label_map.at<uchar>(ny, nx) = inOpenList;
                 }
                 else
                 {
-                    addG = 10;
-                }
-                G = CurNode->G + addG;
-                if(Distance_ == 1)
-                {   // Euclidean distance
-                    int dist2 = (x - targetPoint.x) * (x - targetPoint.x) + (y - targetPoint.y) * (y - targetPoint.y);
-                    H = round(10 * sqrt(dist2));
-                }
-                else if (Distance_ == 2)
-                {   // Manhattan distance
-                    H = 10 * (abs(x - targetPoint.x) + abs(y - targetPoint.y));
-                }
-                else if (Distance_ == 3)
-                {   // Chebyshev distance
-                    H = 10 * (std::max(abs(x - targetPoint.x), abs(y - targetPoint.y)));
-                }
-                else if (Distance_ == 4)
-                {   // Diagonal distance
-                    H = 10 * (abs(x - targetPoint.x) + abs(y - targetPoint.y) + (sqrt(2) - 2) * std::min(abs(x - targetPoint.x), abs(y - targetPoint.y)));
-                }
-
-                F = G + H;
-
-                // Update the G, H, F value of node
-                if(_LabelMap.at<uchar>(y, x) == free)
-                {
-                    Node* node = new Node();
-                    node->point = cv::Point(x, y);
-                    node->parent = CurNode;
-                    node->G = G;
-                    node->H = H;
-                    node->F = F;
-                    OpenList.push(std::pair<int, cv::Point>(node->F, node->point));
-                    int index = point2index(node->point);
-                    OpenDict[index] = node;
-                    _LabelMap.at<uchar>(y, x) = inOpenList;
-                }
-                else // _LabelMap.at<uchar>(y, x) == inOpenList
-                {
                     // Find the node
-                    int index = point2index(cv::Point(x, y));
-                    Node* node = OpenDict[index];
-                    if(G < node->G)
+                    if (Node* existing_node = open_dict_[neighbor_index]; new_g < existing_node->G)
                     {
-                        node->G = G;
-                        node->F = F;
-                        node->parent = CurNode;
+                        existing_node->G = new_g;
+                        existing_node->F = existing_node->G + existing_node->H;
+                        existing_node->parent = current_node;
+                        // 由于优先队列不支持更新，重新插入更新后的节点
+                        open_list_.push(std::make_pair(existing_node->F, existing_node->point));
                     }
                 }
             }
         }
     }
 
-    return NULL; // Can not find a valid path
+    return nullptr; // Can not find a valid path
 }
 
-void AStarPlanner::GetPath(Node* TailNode, std::vector<cv::Point>& path)
+void AStarPlanner::reconstructPath(const Node* end_node, std::vector<cv::Point>& path)
 {
-    PathList.clear();
     path.clear();
 
-    // Save path to PathList
-    Node* CurNode = TailNode;
-    while(CurNode != NULL)
-    {
-        PathList.push_back(CurNode);
-        CurNode = CurNode->parent;
+    // 从终点回溯到起点
+    const Node* current = end_node;
+    while (current != nullptr) {
+        path.push_back(current->point);
+        current = current->parent;
     }
 
-    // Save path to std::vector<Point>
-    int length = PathList.size();
-    for(int i = 0;i < length;i++)
-    {
-        path.push_back(PathList.back()->point);
-        PathList.pop_back();
-    }
+    // 反转路径，使其从起点到终点
+    std::reverse(path.begin(), path.end());
+}
 
-    // Release memory
-    while(OpenList.size()) {
-        cv::Point CurPoint = OpenList.top().second;
-        OpenList.pop();
-        int index = point2index(CurPoint);
-        Node* CurNode = OpenDict[index];
-        delete CurNode;
+void AStarPlanner::cleanup()
+{
+    // 清理所有节点内存
+    for (const Node* node : all_nodes_) {
+        delete node;
     }
-    OpenDict.clear();
+    all_nodes_.clear();
+    open_dict_.clear();
+
+    // 清空优先队列
+    while (!open_list_.empty()) {
+        open_list_.pop();
+    }
+}
+
+int AStarPlanner::calculateHeuristic(const cv::Point& from, const cv::Point& to) const
+{
+    const int dx = abs(from.x - to.x);
+    const int dy = abs(from.y - to.y);
+
+    switch (distance_type_) {
+    case 1: // Euclidean
+        return static_cast<int>(COST_STRAIGHT * std::sqrt(dx * dx + dy * dy));
+    case 2: // Manhattan
+        return COST_STRAIGHT * (dx + dy);
+    case 3: // Chebyshev
+        return COST_STRAIGHT * std::max(dx, dy);
+    case 4: // Diagonal
+        return COST_STRAIGHT * (dx + dy) + (COST_DIAGONAL - 2 * COST_STRAIGHT) * std::min(dx, dy);
+    default:
+        return COST_STRAIGHT * (dx + dy); // 默认使用曼哈顿距离
+    }
 }

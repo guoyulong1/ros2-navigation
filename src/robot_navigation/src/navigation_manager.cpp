@@ -38,14 +38,14 @@ void NavigationNode::initializePlanner() const
     this->get_parameter("inflation_radius", inflation_radius);
     this->get_parameter("obstacle_threshold", obstacle_threshold);
 
-    global_planner_ptr_->setPlanner(std::make_shared<AStarPlanner>(1, obstacle_threshold, inflation_radius));
+    global_planner_ptr_->setPlanner(std::make_shared<AStarPlanner>(1, obstacle_threshold));
 }
 
 void NavigationNode::setCurMapInfo(const nav_msgs::msg::OccupancyGrid::SharedPtr& map_msg)
 {
     current_map_ = map_msg;
 
-    global_planner_ptr_->setMap(map_msg);
+
 
     // 处理地图
     auto processed_map = map_manager_ptr_->processMap(map_msg);
@@ -53,8 +53,8 @@ void NavigationNode::setCurMapInfo(const nav_msgs::msg::OccupancyGrid::SharedPtr
     // 发布处理后的地图
     CommManager::Instance().publishProcessedMap(processed_map);
 
-    // auto processed_map_ptr = std::make_shared<nav_msgs::msg::OccupancyGrid>(processed_map);
-    // global_planner_.setMap(processed_map_ptr);
+    const auto processed_map_ptr = std::make_shared<nav_msgs::msg::OccupancyGrid>(processed_map);
+    global_planner_ptr_->setMap(processed_map_ptr);
     
     // 如果有起点和终点，尝试规划路径
     if (has_start_ && has_goal_) {
